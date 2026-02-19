@@ -13,8 +13,6 @@
 
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
-import android.widget.Toast
-import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -50,7 +48,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -77,8 +74,6 @@ fun NonStreamScreen(
   val scope = rememberCoroutineScope()
   var dropdownExpanded by remember { mutableStateOf(false) }
   val isDisconnectEnabled = uiState.registrationState is RegistrationState.Registered
-  val activity = LocalActivity.current
-  val context = LocalContext.current
 
   MaterialTheme(colorScheme = darkColorScheme()) {
     Box(
@@ -108,8 +103,7 @@ fun NonStreamScreen(
               },
               enabled = isDisconnectEnabled,
               onClick = {
-                activity?.let { viewModel.startUnregistration(it) }
-                    ?: Toast.makeText(context, "Activity not available", Toast.LENGTH_SHORT).show()
+                viewModel.startUnregistration()
                 dropdownExpanded = false
               },
               modifier = Modifier.height(30.dp),
@@ -145,7 +139,7 @@ fun NonStreamScreen(
           modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),
           horizontalAlignment = Alignment.CenterHorizontally,
       ) {
-        if (!uiState.hasActiveDevice) {
+        if (!uiState.hasReadyDevice) {
           Row(
               horizontalArrangement = Arrangement.spacedBy(8.dp),
               verticalAlignment = Alignment.CenterVertically,
@@ -160,16 +154,23 @@ fun NonStreamScreen(
             Text(
                 text = stringResource(R.string.waiting_for_active_device),
                 style = MaterialTheme.typography.bodyMedium,
-                color = Color.White.copy(alpha = 0.7f),
+              color = Color.White.copy(alpha = 0.7f),
             )
           }
         }
+        Text(
+            text =
+                "Detected devices: ${uiState.devices.size} | Active device: ${if (uiState.hasActiveDevice) "yes" else "no"}",
+            style = MaterialTheme.typography.bodySmall,
+            color = Color.White.copy(alpha = 0.7f),
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
 
         // Start Streaming Button
         SwitchButton(
             label = stringResource(R.string.stream_button_title),
             onClick = { viewModel.navigateToStreaming(onRequestWearablesPermission) },
-            enabled = uiState.hasActiveDevice,
+            enabled = uiState.hasReadyDevice,
         )
       }
 

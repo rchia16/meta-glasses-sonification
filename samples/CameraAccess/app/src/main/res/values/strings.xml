@@ -23,6 +23,29 @@
     <string name="non_stream_screen_title" description="Non stream screen title">Stream Your Glasses Camera</string>
     <string name="waiting_for_active_device" description="Waiting for active device message">Waiting for an active device</string>
 
+    <!-- Timer -->
+    <string name="unlimited_time" description="Unlimited Time">Unlimited Time</string>
+    <string name="one_minute" description="1 Minute Timer">1m</string>
+    <string name="five_minute" description="5 Minute Timer">5m</string>
+    <string name="ten_minute" description="10 Minute Timer">10m</string>
+    <string name="fifteen_minute" description="15 Minute Timer">15m</string>
+    <string name="time_remaining" description="Time remaining in minutes and seconds">Time Remaining: <xliff:g id="minutes">%1$d</xliff:g>:<xliff:g id="seconds">%2$02d</xliff:g></string>
+    <string name="listen_for_command" description="Start listening for a voice command">Listen for command</string>
+    <string name="stop_listening" description="Stop active voice listening">Stop listening</string>
+    <string name="listening_for_command" description="Listening status message">Listening for command...</string>
+    <string name="heard_command" description="Recognized voice command message">Heard: %1$s</string>
+    <string name="offline_speech_unavailable" description="Offline speech recognition unavailable">Offline speech recognition unavailable</string>
+    <string name="record_audio_permission_required" description="Record audio permission missing">Microphone permission is required for voice commands</string>
+    <string name="speech_no_match" description="Speech recognition could not detect a command">No command recognized</string>
+    <string name="speech_error_code" description="Speech recognition generic error">Speech recognition error: %1$d</string>
+    <string name="voice_indicator_ready" description="Voice command system ready">Voice: ready</string>
+    <string name="voice_indicator_listening" description="Voice command system listening">Voice: listening</string>
+    <string name="voice_indicator_permission_required" description="Voice command microphone permission required">Voice: microphone permission required</string>
+    <string name="voice_indicator_offline_unavailable" description="Voice command offline engine unavailable">Voice: offline recognition unavailable</string>
+    <string name="tracked_landmarks_label" description="Tracked landmarks list label">Tracked: %1$s</string>
+    <string name="save_landmark_label" description="Manual landmark save input label">Save landmark</string>
+    <string name="save_landmark_button" description="Manual landmark save button">Save landmark (GPS)</string>
+
     <!-- SharePhotoDialog -->
     <string name="photo_captured" description="Photo Captured">Photo Captured</string>
     <string name ="captured_photo" description="Captured Photo">Captured Photo</string>

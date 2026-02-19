@@ -10,6 +10,7 @@ plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.jetbrains.kotlin.android)
   alias(libs.plugins.compose.compiler)
+  alias(libs.plugins.ksp)
 }
 
 android {
@@ -37,8 +38,8 @@ android {
     }
   }
   compileOptions {
-    sourceCompatibility = JavaVersion.VERSION_1_8
-    targetCompatibility = JavaVersion.VERSION_1_8
+      sourceCompatibility = JavaVersion.VERSION_1_8
+      targetCompatibility = JavaVersion.VERSION_1_8
   }
   kotlinOptions { jvmTarget = "1.8" }
   buildFeatures { compose = true }
@@ -66,6 +67,15 @@ dependencies {
   implementation(libs.mwdat.core)
   implementation(libs.mwdat.camera)
   implementation(libs.mwdat.mockdevice)
+  // implementation(libs.tensorflow.lite)
+  implementation("com.google.ai.edge.litert:litert:1.4.0")
+  implementation("com.google.ai.edge.litert:litert-support:1.4.0")
+  implementation("com.google.ai.edge.litert:litert-metadata:1.4.0")
+  implementation("com.google.ai.edge.litert:litert-api:1.4.0")
+  implementation("io.jhdf:jhdf:0.6.10")
+  implementation(libs.androidx.room.runtime)
+  implementation(libs.androidx.room.ktx)
+  ksp(libs.androidx.room.compiler)
   androidTestImplementation(libs.androidx.ui.test.junit4)
   androidTestImplementation(libs.androidx.test.uiautomator)
   androidTestImplementation(libs.androidx.test.rules)
