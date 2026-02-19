@@ -2,37 +2,37 @@
 samples\CameraAccess\app\src\main\assets\sofa\*.sofa
 
 # Gradle files
-.gradle/
-build/
+samples/CameraAccess/.gradle/
+samples/CameraAccess/build/
 
 # Local configuration file (sdk path, etc)
-local.properties
+samples/CameraAccess/local.properties
 
 # Log/OS Files
-*.log
+samples/CameraAccess/*.log
 
 # Android Studio generated files and folders
-captures/
-.externalNativeBuild/
-.cxx/
-*.aab
-*.apk
-output-metadata.json
+samples/CameraAccess/captures/
+samples/CameraAccess/.externalNativeBuild/
+samples/CameraAccess/.cxx/
+samples/CameraAccess/*.aab
+samples/CameraAccess/*.apk
+samples/CameraAccess/output-metadata.json
 
 # IntelliJ
-*.iml
-.idea/
-misc.xml
-deploymentTargetDropDown.xml
-render.experimental.xml
+samples/CameraAccess/*.iml
+samples/CameraAccess/.idea/
+samples/CameraAccess/misc.xml
+samples/CameraAccess/deploymentTargetDropDown.xml
+samples/CameraAccess/render.experimental.xml
 
 # Keystore files
-*.jks
-*.keystore
+samples/CameraAccess/*.jks
+samples/CameraAccess/*.keystore
 
 # Google Services (e.g. APIs or Firebase)
-google-services.json
+samples/CameraAccess/google-services.json
 
 # Android Profiling
-*.hprof
+samples/CameraAccess/*.hprof
 
