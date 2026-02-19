@@ -16,8 +16,8 @@
 
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables
 
-import android.app.Activity
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.meta.wearable.dat.core.Wearables
@@ -61,13 +61,15 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     deviceSelectorJob =
         viewModelScope.launch {
           deviceSelector.activeDevice(Wearables.devices).collect { device ->
+            Log.d(TAG, "activeDevice=${device ?: "none"}")
             _uiState.update { it.copy(hasActiveDevice = device != null) }
           }
         }
 
-    // This allows the app to react to registration changes (registered, unregistered, etc.)
+    // This allows the app to react to registration changes (regi.stered, unregistered, etc.)
     viewModelScope.launch {
       Wearables.registrationState.collect { value ->
+        Log.d(TAG, "registrationState=${value::class.java.simpleName}")
         val previousState = _uiState.value.registrationState
         val showGettingStartedSheet =
             value is RegistrationState.Registered && previousState is RegistrationState.Registering
@@ -80,6 +82,7 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     viewModelScope.launch {
       Wearables.devices.collect { value ->
         val hasMockDevices = MockDeviceKit.getInstance(getApplication()).pairedDevices.isNotEmpty()
+        Log.d(TAG, "devices.count=${value.size} hasMockDevices=$hasMockDevices")
         _uiState.update {
           it.copy(devices = value.toList().toImmutableList(), hasMockDevices = hasMockDevices)
         }
@@ -116,12 +119,12 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     }
   }
 
-  fun startRegistration(activity: Activity) {
-    Wearables.startRegistration(activity)
+  fun startRegistration() {
+    Wearables.startRegistration(getApplication())
   }
 
-  fun startUnregistration(activity: Activity) {
-    Wearables.startUnregistration(activity)
+  fun startUnregistration() {
+    Wearables.startUnregistration(getApplication())
   }
 
   fun navigateToStreaming(onRequestWearablesPermission: suspend (Permission) -> PermissionStatus) {
@@ -131,24 +134,29 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
 
       // Handle the result
       result.onFailure { error, _ ->
+        Log.e(TAG, "checkPermissionStatus failed: ${error.description}")
         setRecentError("Permission check error: ${error.description}")
         return@launch
       }
 
       val permissionStatus = result.getOrNull()
+      Log.d(TAG, "cameraPermissionStatus=$permissionStatus")
       if (permissionStatus == PermissionStatus.Granted) {
         _uiState.update { it.copy(isStreaming = true) }
+        Log.d(TAG, "navigateToStreaming -> isStreaming=true (permission already granted)")
         return@launch
       }
 
       // Request permission
       val requestedPermissionStatus = onRequestWearablesPermission(permission)
+      Log.d(TAG, "requestedCameraPermissionStatus=$requestedPermissionStatus")
       when (requestedPermissionStatus) {
         PermissionStatus.Denied -> {
           setRecentError("Permission denied")
         }
         PermissionStatus.Granted -> {
           _uiState.update { it.copy(isStreaming = true) }
+          Log.d(TAG, "navigateToStreaming -> isStreaming=true (permission granted after request)")
         }
       }
     }

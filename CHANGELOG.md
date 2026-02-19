@@ -5,32 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.0] - 2026-02-03
-
-> **Note:** This version requires updated configuration values from Wearables Developer Center to work with release channels.
-
-### Added
-
-- Meta Ray-Ban Display glasses support.
-- [API] `AutoDeviceSelector` includes new `filter` property. Defaults to filter out incompatible devices.
-- [API] `presentationTimeUs` property to `VideoFrame`.
-
-### Changed
-
-- The registration dialog now opens in place, instead of jumping to Meta AI app.
-- [API] `Wearables.startRegistration` and `Wearables.startUnregistration` accept an Activity
-instead of a Context.
-
-### Removed
-
-- Removed timer functionality in Camera Access app.
-
-### Fixed
-
-- The correct state is now reported after unregistering the application.
-- Improved stream latency, which was degrading over time.
-
-## [0.3.0] - 2025-12-16
+## [0.3.0]
 
 ### Added
 
@@ -100,7 +75,7 @@ instead of a Context.
 - Sessions now close properly when the connection with the glasses is lost.
 - The requested video quality is now correctly applied to the stream.
 
-## [0.1.0] - 2025-10-30
+## [0.1.0]
 
 ### Added
 

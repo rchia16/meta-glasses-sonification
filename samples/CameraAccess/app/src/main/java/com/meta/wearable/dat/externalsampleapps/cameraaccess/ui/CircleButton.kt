@@ -14,15 +14,18 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.TimerMode
 
 @Composable
 fun CircleButton(
@@ -38,6 +41,27 @@ fun CircleButton(
       contentPadding = PaddingValues(0.dp),
       content = content,
   )
+}
+
+@Composable
+fun TimerButton(
+    timerMode: TimerMode,
+    onClick: () -> Unit,
+) {
+  CircleButton(onClick = onClick) {
+    if (timerMode == TimerMode.UNLIMITED) {
+      Icon(
+          imageVector = Icons.Filled.Timer,
+          contentDescription = stringResource(timerMode.labelId),
+          tint = Color.Black,
+      )
+    } else {
+      Text(
+          text = stringResource(timerMode.labelId),
+          color = Color.Black,
+      )
+    }
+  }
 }
 
 @Composable

@@ -1,3 +1,17 @@
+# Rays Additions
+To save or forget a position:
+  - save landmark <name> / save <name>
+  - track <name> / forget <name>
+Turn on/off north compass
+  - north mode on|off
+Activate or deactivate complete scene replay
+  - activate, deactivate
+Ping any persistent landmark or north:
+  - ping <name>
+Sonify only a single class:
+  - "only <name>" 
+  - "<name> only"
+
 # Camera Access App
 
 A sample Android application demonstrating integration with Meta Wearables Device Access Toolkit. This app showcases streaming video from Meta AI glasses, capturing photos, and managing connection states.
@@ -7,6 +21,7 @@ A sample Android application demonstrating integration with Meta Wearables Devic
 - Connect to Meta AI glasses
 - Stream camera feed from the device
 - Capture photos from glasses
+- Timer-based streaming sessions
 - Share captured photos
 
 ## Prerequisites
@@ -34,6 +49,7 @@ A sample Android application demonstrating integration with Meta Wearables Devic
 1. Press the "Connect" button to complete app registration.
 1. Once connected, the camera stream from the device will be displayed
 1. Use the on-screen controls to:
+   - Set stream time limits
    - Capture photos
    - View and save captured photos
    - Disconnect from the device
