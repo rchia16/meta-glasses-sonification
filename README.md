@@ -1,3 +1,7 @@
+# TODO
+PlaneNet or PlaneRCNN may be a more suitable and lightweight specialised model for use 
+art-programmer/PlaneNet
+
 # Rays commands
 ## Voice Commands
 track <name>
