@@ -1,0 +1,36 @@
+{
+  "classes": {
+    "wall": {
+      "id": 0,
+      "label": "wall"
+    },
+    "floor": {
+      "id": 3,
+      "label": "floor"
+    },
+    "ceiling": {
+      "id": 5,
+      "label": "ceiling"
+    },
+    "door": {
+      "id": 14,
+      "label": "door"
+    },
+    "windowpane": {
+      "id": 8,
+      "label": "windowpane"
+    },
+    "table": {
+      "id": 15,
+      "label": "table"
+    },
+    "chair": {
+      "id": 19,
+      "label": "chair"
+    },
+    "sofa": {
+      "id": 23,
+      "label": "sofa"
+    }
+  }
+}
