@@ -72,6 +72,7 @@ dependencies {
   implementation("com.google.ai.edge.litert:litert-support:1.4.0")
   implementation("com.google.ai.edge.litert:litert-metadata:1.4.0")
   implementation("com.google.ai.edge.litert:litert-api:1.4.0")
+  implementation("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
   implementation("io.jhdf:jhdf:0.6.10")
   implementation(libs.androidx.room.runtime)
   implementation(libs.androidx.room.ktx)

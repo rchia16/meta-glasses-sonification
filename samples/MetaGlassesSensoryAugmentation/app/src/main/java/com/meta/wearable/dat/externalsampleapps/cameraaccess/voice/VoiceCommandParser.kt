@@ -20,6 +20,14 @@ class VoiceCommandParser {
             val target = cleaned.substringAfter(" ", "").trim()
             return if (target.isNotEmpty()) VoiceCommand.Ping(target) else VoiceCommand.Unknown(transcript)
         }
+        if (lower.startsWith("object ")) {
+            val className = cleaned.substringAfter(" ", "").trim()
+            return if (className.isNotEmpty()) VoiceCommand.TrackObject(className) else VoiceCommand.Unknown(transcript)
+        }
+        if (lower.startsWith("follow ")) {
+            val className = cleaned.substringAfter(" ", "").trim()
+            return if (className.isNotEmpty()) VoiceCommand.TrackObject(className) else VoiceCommand.Unknown(transcript)
+        }
         if (lower == "north mode on" || lower == "enable north mode") {
             return VoiceCommand.EnableNorthCueMode
         }

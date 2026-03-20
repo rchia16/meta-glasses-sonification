@@ -1,0 +1,99 @@
+{
+  "source_checkpoint": "D:\\Ray\\StudioProjects\\meta-glasses-sonification\\samples\\MetaGlassesSensoryAugmentation\\tools\\SOLOPlanes\\SOLOPlanes-main\\checkpoints\\solopmv.ckpt",
+  "source_backbone": "D:\\Ray\\StudioProjects\\meta-glasses-sonification\\samples\\MetaGlassesSensoryAugmentation\\tools\\SOLOPlanes\\SOLOPlanes-main\\pretrained\\resnet50.pth",
+  "export_format": "onnx",
+  "export_path": "D:\\Ray\\StudioProjects\\meta-glasses-sonification\\samples\\MetaGlassesSensoryAugmentation\\tools\\SOLOPlanes\\SOLOPlanes-main\\checkpoints\\solopmv_mobile.onnx",
+  "checkpoint_epoch": 6,
+  "checkpoint_global_step": 13321,
+  "state_load_notes": [
+    "normalize_im.mean",
+    "normalize_im.std"
+  ],
+  "head_summary": {
+    "plane_head_channels": 3,
+    "mask_feat_channels": 128,
+    "plane_feat_channels": 64,
+    "solo_num_classes": 41,
+    "solo_levels": [
+      36,
+      24,
+      16
+    ],
+    "kernel_channels": 128
+  },
+  "contract": {
+    "input_shape_nchw": [
+      1,
+      3,
+      480,
+      640
+    ],
+    "output_names": [
+      "plane_params",
+      "plane_feat",
+      "mask_feat",
+      "cate_l0",
+      "cate_l1",
+      "cate_l2",
+      "kernel_l0",
+      "kernel_l1",
+      "kernel_l2"
+    ],
+    "output_shapes": {
+      "plane_params": [
+        1,
+        3,
+        120,
+        160
+      ],
+      "plane_feat": [
+        1,
+        64,
+        120,
+        160
+      ],
+      "mask_feat": [
+        1,
+        128,
+        120,
+        160
+      ],
+      "cate_l0": [
+        1,
+        41,
+        36,
+        36
+      ],
+      "cate_l1": [
+        1,
+        41,
+        24,
+        24
+      ],
+      "cate_l2": [
+        1,
+        41,
+        16,
+        16
+      ],
+      "kernel_l0": [
+        1,
+        128,
+        36,
+        36
+      ],
+      "kernel_l1": [
+        1,
+        128,
+        24,
+        24
+      ],
+      "kernel_l2": [
+        1,
+        128,
+        16,
+        16
+      ]
+    }
+  }
+}

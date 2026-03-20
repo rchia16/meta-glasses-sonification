@@ -3,6 +3,8 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.voice
 sealed interface VoiceCommand {
     data class Track(val name: String) : VoiceCommand
 
+    data class TrackObject(val className: String) : VoiceCommand
+
     data class SaveLandmark(val name: String) : VoiceCommand
 
     data class Forget(val name: String) : VoiceCommand

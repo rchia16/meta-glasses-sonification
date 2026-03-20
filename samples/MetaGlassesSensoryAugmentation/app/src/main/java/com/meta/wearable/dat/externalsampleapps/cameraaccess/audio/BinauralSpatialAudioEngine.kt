@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -59,6 +60,12 @@ class BinauralSpatialAudioEngine(
         )
     private val decodedCueCache = mutableMapOf<String, MonoPcm>()
     private var activeTrack: AudioTrack? = null
+    private var continuousTrack: AudioTrack? = null
+    private val continuousStateLock = java.lang.Object()
+    private val continuousStatesById = linkedMapOf<ContinuousChannelId, ContinuousAudioChannelState>()
+    private val continuousRuntimeById = ConcurrentHashMap<ContinuousChannelId, ContinuousChannelRuntime>()
+    @Volatile private var continuousRunning = true
+    private val continuousThread: Thread
     private var preferredOutputDevice: AudioDeviceInfo? = null
     private var routeStatusListener: ((AudioRouteStatus) -> Unit)? = null
     private var lastRenderedPcm16: ByteArray? = null
@@ -80,6 +87,16 @@ class BinauralSpatialAudioEngine(
     init {
         audioManager.registerAudioDeviceCallback(audioDeviceCallback, callbackHandler)
         refreshPreferredOutputDevice()
+        continuousThread =
+            Thread(
+                {
+                    runContinuousLoop()
+                },
+                "continuous-spatial-audio",
+            ).apply {
+                isDaemon = true
+                start()
+            }
         Log.i(
             TAG,
             "Spatial audio engine initialized sofaLoaded=${sofaInfo != null} hrirLoaded=${hrirDb != null} source=$hrirSourceLabel sofaPath=${sofaInfo?.assetPath ?: "n/a"}",
@@ -92,6 +109,23 @@ class BinauralSpatialAudioEngine(
     }
 
     fun lastDebugSummary(): String? = lastPlaybackDebugInfo?.summary
+
+    fun updateContinuousChannels(states: List<ContinuousAudioChannelState>) {
+        synchronized(continuousStateLock) {
+            continuousStatesById.clear()
+            states.filter { it.enabled && it.gain > 0.001f }.forEach { state ->
+                continuousStatesById[state.channelId] = state
+            }
+            continuousStateLock.notifyAll()
+        }
+    }
+
+    fun clearContinuousChannels() {
+        synchronized(continuousStateLock) {
+            continuousStatesById.clear()
+            continuousStateLock.notifyAll()
+        }
+    }
 
     fun playSpatialCue(
         soundAssetPath: String,
@@ -417,6 +451,11 @@ class BinauralSpatialAudioEngine(
     }
 
     override fun close() {
+        continuousRunning = false
+        synchronized(continuousStateLock) {
+            continuousStateLock.notifyAll()
+        }
+        continuousThread.join(250L)
         routeStatusListener = null
         audioManager.unregisterAudioDeviceCallback(audioDeviceCallback)
         activeTrack?.runCatching {
@@ -425,10 +464,17 @@ class BinauralSpatialAudioEngine(
             release()
         }
         activeTrack = null
+        continuousTrack?.runCatching {
+            pause()
+            flush()
+            release()
+        }
+        continuousTrack = null
         preferredOutputDevice = null
         lastRenderedPcm16 = null
         lastRenderedSampleRateHz = 0
         decodedCueCache.clear()
+        continuousRuntimeById.clear()
     }
 
     private fun onAudioRouteChanged(reason: String) {
@@ -484,6 +530,9 @@ class BinauralSpatialAudioEngine(
         }
         activeTrack = null
         playPcm16Stereo(pcm, sr)
+        preferredOutputDevice?.let { routeDevice ->
+            continuousTrack?.setPreferredDevice(routeDevice)
+        }
     }
 
     private fun publishDebug(parts: List<String>) {
@@ -494,6 +543,237 @@ class BinauralSpatialAudioEngine(
 
     private fun currentRouteLabel(): String {
         return preferredOutputDevice?.let { "bt:${it.productName ?: "unknown"}#${it.id}" } ?: "non-bt/default"
+    }
+
+    private fun runContinuousLoop() {
+        while (continuousRunning) {
+            val snapshot =
+                synchronized(continuousStateLock) {
+                    while (continuousRunning && continuousStatesById.isEmpty()) {
+                        continuousTrack?.runCatching {
+                            pause()
+                            flush()
+                        }
+                        continuousStateLock.wait(250L)
+                    }
+                    continuousStatesById.values.toList()
+                }
+            if (!continuousRunning) {
+                break
+            }
+            if (snapshot.isEmpty()) {
+                continue
+            }
+
+            val sampleRateHz = hrirDb?.sampleRateHz ?: 44_100
+            val bufferFrames = 1024
+            val leftMix = FloatArray(bufferFrames)
+            val rightMix = FloatArray(bufferFrames)
+
+            snapshot.forEach { state ->
+                mixContinuousChannel(
+                    state = state,
+                    sampleRateHz = sampleRateHz,
+                    leftMix = leftMix,
+                    rightMix = rightMix,
+                )
+            }
+            softLimit(leftMix, rightMix)
+            val track = ensureContinuousTrack(sampleRateHz, bufferFrames)
+            if (track != null) {
+                val pcm16 = interleaveStereoPcm16(leftMix, rightMix)
+                val written = track.write(pcm16, 0, pcm16.size)
+                if (written <= 0) {
+                    SystemClock.sleep(20L)
+                } else if (track.playState != AudioTrack.PLAYSTATE_PLAYING) {
+                    track.play()
+                }
+            } else {
+                SystemClock.sleep(20L)
+            }
+        }
+    }
+
+    private fun mixContinuousChannel(
+        state: ContinuousAudioChannelState,
+        sampleRateHz: Int,
+        leftMix: FloatArray,
+        rightMix: FloatArray,
+    ) {
+        val runtime = continuousRuntimeById[state.channelId] ?: createContinuousRuntime(state, sampleRateHz) ?: return
+        if (runtime.assetPath != state.soundAssetPath) {
+            continuousRuntimeById.remove(state.channelId)
+            createContinuousRuntime(state, sampleRateHz) ?: return
+            mixContinuousChannel(state, sampleRateHz, leftMix, rightMix)
+            return
+        }
+
+        val monoChunk = runtime.readLoop(bufferFrames = leftMix.size)
+        val shaped = FloatArray(monoChunk.size)
+        val amplitude = state.gain.coerceIn(0f, 0.35f)
+        val beatIncrement = if (state.beatRateHz > 0f) ((2f * PI.toFloat()) * state.beatRateHz) / sampleRateHz.toFloat() else 0f
+        var prev = runtime.prevSample
+        var beatPhase = runtime.beatPhase
+        for (i in monoChunk.indices) {
+            val dry = monoChunk[i]
+            val hp = dry - prev
+            prev = dry
+            val bright = dry + (hp * state.tiltEq.coerceIn(-0.5f, 0.5f))
+            val beatGain =
+                if (state.beatRateHz > 0f) {
+                    val env = 0.25f + (0.75f * ((sin(beatPhase) + 1f) * 0.5f))
+                    beatPhase += beatIncrement
+                    env
+                } else {
+                    1f
+                }
+            shaped[i] = (bright * amplitude * beatGain).coerceIn(-1f, 1f)
+        }
+        runtime.prevSample = prev
+        runtime.beatPhase = beatPhase % (2f * PI.toFloat())
+
+        val db = hrirDb
+        val (left, right) =
+            if (db != null) {
+                val hrir = db.nearest(azimuthDeg = -state.azimuthDeg, elevationDeg = state.elevationDeg)
+                if (hrir != null) {
+                    convolveStereoChunk(shaped, hrir.left, hrir.right, runtime)
+                } else {
+                    renderStereoPanFallback(shaped, state.azimuthDeg, state.elevationDeg)
+                }
+            } else {
+                renderStereoPanFallback(shaped, state.azimuthDeg, state.elevationDeg)
+            }
+
+        for (i in left.indices) {
+            leftMix[i] += left[i]
+            rightMix[i] += right[i]
+        }
+    }
+
+    private fun ensureContinuousTrack(
+        sampleRateHz: Int,
+        bufferFrames: Int,
+    ): AudioTrack? {
+        continuousTrack?.let { existing ->
+            if (existing.sampleRate == sampleRateHz && existing.state == AudioTrack.STATE_INITIALIZED) {
+                return existing
+            }
+            existing.runCatching {
+                pause()
+                flush()
+                release()
+            }
+            continuousTrack = null
+        }
+
+        val minBuffer =
+            AudioTrack.getMinBufferSize(
+                sampleRateHz,
+                AudioFormat.CHANNEL_OUT_STEREO,
+                AudioFormat.ENCODING_PCM_16BIT,
+            )
+        val track =
+            AudioTrack(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build(),
+                AudioFormat.Builder()
+                    .setSampleRate(sampleRateHz)
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
+                    .build(),
+                max(minBuffer, bufferFrames * 8),
+                AudioTrack.MODE_STREAM,
+                AudioManager.AUDIO_SESSION_ID_GENERATE,
+            )
+        preferredOutputDevice?.let { routeDevice ->
+            track.setPreferredDevice(routeDevice)
+        }
+        continuousTrack = track
+        return track
+    }
+
+    private fun createContinuousRuntime(
+        state: ContinuousAudioChannelState,
+        sampleRateHz: Int,
+    ): ContinuousChannelRuntime? {
+        val monoPcm = getOrDecodeMonoPcm(state.soundAssetPath) ?: return null
+        val resampled = resampleLinear(monoPcm.samples, monoPcm.sampleRateHz, sampleRateHz)
+        return ContinuousChannelRuntime(
+            assetPath = state.soundAssetPath,
+            loop = if (resampled.isNotEmpty()) resampled else floatArrayOf(0f),
+            historyLeft = FloatArray((hrirDb?.irLength ?: 1).coerceAtLeast(1) - 1),
+            historyRight = FloatArray((hrirDb?.irLength ?: 1).coerceAtLeast(1) - 1),
+        ).also {
+            continuousRuntimeById[state.channelId] = it
+        }
+    }
+
+    private fun convolveStereoChunk(
+        monoInput: FloatArray,
+        hrirLeft: FloatArray,
+        hrirRight: FloatArray,
+        runtime: ContinuousChannelRuntime,
+    ): Pair<FloatArray, FloatArray> {
+        val irLen = minOf(hrirLeft.size, hrirRight.size)
+        if (monoInput.isEmpty() || irLen <= 0) {
+            return FloatArray(monoInput.size) to FloatArray(monoInput.size)
+        }
+        val left = FloatArray(monoInput.size)
+        val right = FloatArray(monoInput.size)
+        val histLeft = runtime.historyLeft
+        val histRight = runtime.historyRight
+        for (n in monoInput.indices) {
+            var accLeft = 0f
+            var accRight = 0f
+            for (k in 0 until irLen) {
+                val srcIndex = n - k
+                val sample =
+                    if (srcIndex >= 0) {
+                        monoInput[srcIndex]
+                    } else {
+                        val histIndex = histLeft.size + srcIndex
+                        if (histIndex in histLeft.indices) histLeft[histIndex] else 0f
+                    }
+                accLeft += sample * hrirLeft[k]
+                accRight += sample * hrirRight[k]
+            }
+            left[n] = accLeft
+            right[n] = accRight
+        }
+        val historySize = histLeft.size
+        if (historySize > 0) {
+            if (monoInput.size >= historySize) {
+                val start = monoInput.size - historySize
+                for (i in 0 until historySize) {
+                    histLeft[i] = monoInput[start + i]
+                    histRight[i] = monoInput[start + i]
+                }
+            } else {
+                val shift = historySize - monoInput.size
+                for (i in 0 until shift) {
+                    histLeft[i] = histLeft[i + monoInput.size]
+                    histRight[i] = histRight[i + monoInput.size]
+                }
+                for (i in monoInput.indices) {
+                    histLeft[shift + i] = monoInput[i]
+                    histRight[shift + i] = monoInput[i]
+                }
+            }
+        }
+        return left to right
+    }
+
+    private fun softLimit(
+        left: FloatArray,
+        right: FloatArray,
+    ) {
+        for (i in left.indices) {
+            left[i] = (left[i] / (1f + abs(left[i]))).coerceIn(-1f, 1f)
+            right[i] = (right[i] / (1f + abs(right[i]))).coerceIn(-1f, 1f)
+        }
     }
 
     private data class MonoPcm(
@@ -507,4 +787,29 @@ class BinauralSpatialAudioEngine(
         val trackState: Int,
         val playState: Int,
     )
+
+    private data class ContinuousChannelRuntime(
+        val assetPath: String,
+        val loop: FloatArray,
+        val historyLeft: FloatArray,
+        val historyRight: FloatArray,
+        var readIndex: Int = 0,
+        var prevSample: Float = 0f,
+        var beatPhase: Float = 0f,
+    ) {
+        fun readLoop(bufferFrames: Int): FloatArray {
+            val out = FloatArray(bufferFrames)
+            if (loop.isEmpty()) {
+                return out
+            }
+            for (i in 0 until bufferFrames) {
+                out[i] = loop[readIndex]
+                readIndex += 1
+                if (readIndex >= loop.size) {
+                    readIndex = 0
+                }
+            }
+            return out
+        }
+    }
 }

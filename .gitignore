@@ -1,9 +1,24 @@
+*.un~
+__pycache__/
+*.pyc
+*.pkl
+
 # SOFA files
-samples/MetaGlassesSensoryAugmentation/app/src/main/assets/sofa/BRIR_HATS_3degree_for_glasses.sof
+samples/MetaGlassesSensoryAugmentation/app/src/main/assets/sofa/BRIR_HATS_3degree_for_glasses.sofa
 
 # Models
-samples\MetaGlassesSensoryAugmentation\app\src\main\assets\models\*\*
-samples\MetaGlassesSensoryAugmentation\app\src\main\assets\models\*
+samples/MetaGlassesSensoryAugmentation/app/src/main/assets/models/**
+
+samples/MetaGlassesSensoryAugmentation/tools/**/*.pt
+samples/MetaGlassesSensoryAugmentation/tools/**/*.onnx
+samples/MetaGlassesSensoryAugmentation/tools/**/*.ckpt
+
+# Large model + data files
+*.sofa
+*.onnx
+*.pth
+*.pt
+*.ckpt
 
 # Gradle files
 samples/MetaGlassesSensoryAugmentation/.gradle/

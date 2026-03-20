@@ -20,6 +20,11 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.stream
 import android.app.Application
 import android.content.Intent
 import android.location.Location
+import android.os.Build
+import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.hardware.SensorManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -44,6 +49,8 @@ import com.meta.wearable.dat.camera.types.VideoQuality
 import com.meta.wearable.dat.core.Wearables
 import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.audio.BinauralSpatialAudioEngine
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.audio.ContinuousAudioChannelState
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.audio.ContinuousChannelId
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.audio.ObjectSonificationProfile
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.audio.ObjectSonificationProfiles
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.cue.CueType
@@ -66,12 +73,10 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.priority.SceneCueSc
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.priority.CueSource
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.priority.UnifiedCueArbitrator
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.priority.UnifiedCueCandidate
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.plane.PlaneReconstructionResult
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.plane.SoloPlanesOnnxReconstructor
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.scene.SceneClass
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.scene.SceneCueCandidate
-import com.meta.wearable.dat.externalsampleapps.cameraaccess.segmentation.IndoorLabelMap
-import com.meta.wearable.dat.externalsampleapps.cameraaccess.segmentation.SemanticSegmentationEngine
-import com.meta.wearable.dat.externalsampleapps.cameraaccess.segmentation.SegmentationOutput
-import com.meta.wearable.dat.externalsampleapps.cameraaccess.segmentation.StubSemanticSegmentationEngine
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.sensors.MagneticHeadingService
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.spatial.normalize360
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.spatial.normalizeSigned180
@@ -97,10 +102,11 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-
-import android.os.SystemClock
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.priority.RankedObjectCandidate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
+import kotlin.random.Random
 
 
 class StreamViewModel(
@@ -116,14 +122,17 @@ class StreamViewModel(
         private const val SSD_MOBILENET_MODEL_ASSET_PATH = ""
         //  "models/ssd_mobilenet_v3_large_coco_2020_01_14/model.tflite"
         private const val YOLO26_NANO_MODEL_ASSET_PATH = "models/yolo12n_saved_model/yolo12n_float16.tflite"
+        private const val SOLOPLANES_MODEL_ASSET_PATH = "models/soloplanes_saved_model/solopmv_mobile.onnx"
         private const val CAMERA_HORIZONTAL_FOV_DEGREES = 58f
         private const val CAMERA_VERTICAL_FOV_DEGREES = 45f
         private const val SOFA_ASSET_PATH = "sofa/BRIR_HATS_3degree_for_glasses.sofa"
         private const val COMPACT_HRIR_ASSET_PATH = "hrir/hrir_compact_v1.bin"
-        private const val NORTH_CUE_SOUND_ASSET_PATH = "audio/retro.wav"
+        private const val NORTH_CUE_SOUND_ASSET_PATH = "audio/scifi.wav"
         private const val NORTH_CUE_COOLDOWN_MS = 5_000L
         private const val LANDMARK_CUE_SOUND_ASSET_PATH = "audio/bling.wav"
         private const val LANDMARK_CUE_COOLDOWN_MS = 6_000L
+        private const val PEOPLE_DETECTION_LABEL = "person"
+        private const val PEOPLE_DETECTION_INTERVAL_MS = 800L
     }
 
     private val deviceSelector: DeviceSelector = wearablesViewModel.deviceSelector
@@ -147,13 +156,24 @@ class StreamViewModel(
     private val rankingPolicy = ObjectRankingPolicy()
     private val sceneCueScheduler = SceneCueScheduler(getApplication())
     private val unifiedCueArbitrator = UnifiedCueArbitrator()
-    private val semanticSegmentationEngine: SemanticSegmentationEngine = StubSemanticSegmentationEngine()
+    private val soloPlanesReconstructor =
+        SoloPlanesOnnxReconstructor.createFromAssets(
+            context = getApplication(),
+            modelAssetPath = SOLOPLANES_MODEL_ASSET_PATH,
+        )
     private val spatialAudioEngine =
         BinauralSpatialAudioEngine(
             context = getApplication(),
             sofaAssetPath = SOFA_ASSET_PATH,
             compactHrirAssetPath = COMPACT_HRIR_ASSET_PATH,
         )
+    private val vibrator: Vibrator? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            getApplication<Application>().getSystemService(VibratorManager::class.java)?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getApplication<Application>().getSystemService(Vibrator::class.java)
+        }
     private val mobileNetDetector =
         SsdMobileNetTfliteDetector.createFromAssets(
             context = getApplication(),
@@ -174,6 +194,7 @@ class StreamViewModel(
     private var stateJob: Job? = null
     private var timerJob: Job? = null
     private var objectCueJob: Job? = null
+    private var northHapticJob: Job? = null
     private val trackAzimuthById = ConcurrentHashMap<Long, Float>()
     private var activeCueWorldBearingDeg: Float? = null
     private var latestHeadingDegrees: Float? = null
@@ -181,10 +202,10 @@ class StreamViewModel(
     private var lastNorthCueAtMs: Long = 0L
     private var lastLandmarkCueAtMs: Long = 0L
     private var audioPlaybackToken: Long = 0L
-    @Volatile private var latestSegmentationOutput: SegmentationOutput? = null
+    @Volatile private var isObjectTrackingChordPressed: Boolean = false
+    @Volatile private var latestPlaneReconstruction: PlaneReconstructionResult? = null
 
     init {
-        semanticSegmentationEngine.initialize()
         _uiState.update {
             it.copy(sonificationProfiles = ObjectSonificationProfiles.snapshotProfiles())
         }
@@ -221,9 +242,7 @@ class StreamViewModel(
             launch {
                 landmarkManager.landmarks.collect { landmarks ->
                     currentLandmarks = landmarks
-                    _uiState.update { state ->
-                        state.copy(trackedLandmarks = landmarks.map { it.name })
-                    }
+                    _uiState.update { state -> state.copy(trackedLandmarks = landmarks.map { it.name }) }
                 }
             }
 
@@ -240,6 +259,7 @@ class StreamViewModel(
                             activeObjectSpatialAzimuthDeg = spatialAzimuth,
                         )
                     }
+                    updateContinuousAudioState()
                 }
             }
 
@@ -295,6 +315,25 @@ class StreamViewModel(
                         LandmarkTrackResult.InvalidName -> {
                             _uiState.update { it.copy(lastVoiceStatus = "Invalid landmark name") }
                         }
+                    }
+                }
+            }
+
+            is VoiceCommand.TrackObject -> {
+                val label = resolveOnlyClassLabel(command.className)
+                if (label == null) {
+                    val supported = ObjectSonificationProfiles.supportedLabels().joinToString()
+                    _uiState.update {
+                        it.copy(
+                            lastVoiceStatus =
+                                "Unknown object '${command.className}'. Supported: $supported",
+                        )
+                    }
+                } else {
+                    setObjectSonificationEnabled(true)
+                    setOnlyObjectSonificationLabel(label)
+                    _uiState.update {
+                        it.copy(lastVoiceStatus = "Tracking continuous object audio for '$label'")
                     }
                 }
             }
@@ -382,10 +421,12 @@ class StreamViewModel(
 
             VoiceCommand.EnableNorthCueMode -> {
                 _uiState.update { it.copy(isNorthCueEnabled = true, lastVoiceStatus = "North mode enabled") }
+                updateContinuousAudioState()
             }
 
             VoiceCommand.DisableNorthCueMode -> {
                 _uiState.update { it.copy(isNorthCueEnabled = false, lastVoiceStatus = "North mode disabled") }
+                updateContinuousAudioState()
             }
 
             VoiceCommand.ActivateObjectSonification -> {
@@ -405,12 +446,12 @@ class StreamViewModel(
 
             is VoiceCommand.Unknown -> {
                 _uiState.update {
-                    it.copy(
-                        lastVoiceStatus =
-                            "Unknown command. Supported: track/save/forget <name>, ping <saved landmark|north>, only <class> or <class> only, north mode on/off, activate, deactivate",
-                    )
+                        it.copy(
+                            lastVoiceStatus =
+                                "Unknown command. Supported: track/save/forget <landmark>, object/follow <class>, ping <saved landmark|north>, only <class> or <class> only, north mode on/off, activate, deactivate",
+                        )
+                    }
                 }
-            }
         }
     }
 
@@ -535,7 +576,7 @@ class StreamViewModel(
                     val i420 = extractI420Bytes(frame)
                     val rawFrame = RawCameraFrame(width = frame.width, height = frame.height, i420 = i420)
 
-                    val (filteredDetections, trackedObjects, segmentationOutput, bitmap) = withContext(Dispatchers.Default) {
+                    val (filteredDetections, trackedObjects, planeReconstruction, bitmap) = withContext(Dispatchers.Default) {
                         coroutineScope {
                             val bitmapDeferred =
                                 async {
@@ -545,23 +586,26 @@ class StreamViewModel(
                                         height = frame.height,
                                     )
                                 }
-                            val segmentationDeferred =
+                            val planeDeferred =
                                 async {
-                                    runCatching { semanticSegmentationEngine.segment(rawFrame) }
+                                    runCatching {
+                                        soloPlanesReconstructor?.reconstruct(rawFrame)
+                                            ?: PlaneReconstructionResult.empty(frame.width, frame.height)
+                                    }
                                         .onFailure { t ->
-                                            Log.w(TAG, "Segmentation inference failed; using empty output", t)
+                                            Log.w(TAG, "SOLOPlanes inference failed; using empty output", t)
                                         }.getOrElse {
-                                            SegmentationOutput.empty(frame.width, frame.height)
+                                            PlaneReconstructionResult.empty(frame.width, frame.height)
                                         }
                                 }
                             val rawDetections = detectObjects(rawFrame)
                             val filtered = filterToNavigationClasses(rawDetections)
                             val tracked = objectTracker.update(filtered, SystemClock.elapsedRealtime())
-                            Quadruple(filtered, tracked, segmentationDeferred.await(), bitmapDeferred.await())
+                            Quadruple(filtered, tracked, planeDeferred.await(), bitmapDeferred.await())
                         }
                     }
                     logDetectionsForFrame(frame, filteredDetections)
-                    latestSegmentationOutput = segmentationOutput
+                    latestPlaneReconstruction = planeReconstruction
 
                     logFrameAndBitmap(frame, bitmap)
 
@@ -576,6 +620,7 @@ class StreamViewModel(
                         )
                     }
                     updateTrackRelativeAzimuths(trackedObjects, frame.width)
+                    updateContinuousAudioState()
                     reportProcessedFps()
                 } catch (t: Throwable) {
                     Log.e(TAG, "Frame processing failed; keeping stream alive", t)
@@ -607,7 +652,14 @@ class StreamViewModel(
 
         objectCueJob = viewModelScope.launch {
             while (isActive) {
-                emitSceneCues()
+                val state = _uiState.value
+                if (state.isObjectSonificationEnabled &&
+                    state.onlySonificationLabel == PEOPLE_DETECTION_LABEL) {
+                    emitPeopleDetectionCue()
+                    delay(PEOPLE_DETECTION_INTERVAL_MS)
+                } else {
+                    emitSceneCues()
+                }
             }
         }
     }
@@ -631,6 +683,35 @@ class StreamViewModel(
                 onlySonificationLabel = if (enabled) state.onlySonificationLabel else null,
             )
         }
+        updateContinuousAudioState()
+    }
+
+    fun setPeopleDetectionEnabled(enabled: Boolean) {
+        isObjectTrackingChordPressed = false
+        _uiState.update { state ->
+            state.copy(
+                isObjectSonificationEnabled = enabled,
+                onlySonificationLabel = if (enabled) PEOPLE_DETECTION_LABEL else null,
+                lastVoiceStatus =
+                    if (enabled) {
+                        "People detection enabled at 1.25 Hz"
+                    } else {
+                        "People detection disabled"
+                    },
+            )
+        }
+        updateContinuousAudioState()
+    }
+
+    fun setObjectTrackingChordPressed(pressed: Boolean) {
+        if (isObjectTrackingChordPressed == pressed) {
+            return
+        }
+        isObjectTrackingChordPressed = pressed
+        _uiState.update { state ->
+            state.copy(isObjectSonificationEnabled = pressed)
+        }
+        updateContinuousAudioState()
     }
 
     fun setSceneSegmentationSonificationEnabled(enabled: Boolean) {
@@ -642,8 +723,61 @@ class StreamViewModel(
         }
     }
 
+    fun setNorthCueEnabled(enabled: Boolean) {
+        _uiState.update { state -> state.copy(isNorthCueEnabled = enabled) }
+        updateContinuousAudioState()
+    }
+
+    fun toggleNorthAudioMode() {
+        _uiState.update { state ->
+            state.copy(
+                northAudioMode =
+                    if (state.northAudioMode == NorthFeedbackMode.CALM) {
+                        NorthFeedbackMode.EMPHATIC
+                    } else {
+                        NorthFeedbackMode.CALM
+                    },
+                lastVoiceStatus =
+                    "North audio mode ${if (state.northAudioMode == NorthFeedbackMode.CALM) "emphatic" else "calm"}",
+            )
+        }
+        updateContinuousAudioState()
+    }
+
+    fun setNorthHapticEnabled(enabled: Boolean) {
+        _uiState.update { state ->
+            state.copy(
+                isNorthHapticEnabled = enabled,
+                lastVoiceStatus =
+                    if (enabled) {
+                        "North haptic guidance enabled"
+                    } else {
+                        "North haptic guidance disabled"
+                    },
+            )
+        }
+        updateNorthHapticLoop()
+    }
+
+    fun toggleNorthHapticMode() {
+        _uiState.update { state ->
+            state.copy(
+                northHapticMode =
+                    if (state.northHapticMode == NorthFeedbackMode.CALM) {
+                        NorthFeedbackMode.EMPHATIC
+                    } else {
+                        NorthFeedbackMode.CALM
+                    },
+                lastVoiceStatus =
+                    "North haptic mode ${if (state.northHapticMode == NorthFeedbackMode.CALM) "emphatic" else "calm"}",
+            )
+        }
+        updateNorthHapticLoop()
+    }
+
     fun setOnlyObjectSonificationLabel(label: String?) {
         _uiState.update { state -> state.copy(onlySonificationLabel = label) }
+        updateContinuousAudioState()
     }
 
     fun setOnlySceneSonificationLabel(label: String?) {
@@ -728,12 +862,7 @@ class StreamViewModel(
         state: StreamUiState,
         hasRankedObjects: Boolean,
         nowMs: Long = SystemClock.elapsedRealtime(),
-    ): Boolean {
-        if (!state.isNorthCueEnabled) return false
-        if (latestHeadingDegrees == null) return false
-        if ((nowMs - lastNorthCueAtMs) < NORTH_CUE_COOLDOWN_MS) return false
-        return !hasRankedObjects || !state.isObjectSonificationEnabled
-    }
+    ): Boolean = false
 
     private suspend fun emitNorthCue(trigger: String): Boolean {
         val heading = latestHeadingDegrees ?: return false
@@ -850,22 +979,7 @@ class StreamViewModel(
         state: StreamUiState,
         hasRankedObjects: Boolean,
     ): Boolean {
-        if (!state.isLandmarkCueEnabled) return false
-        if (currentLandmarks.isEmpty()) return false
-        if (hasRankedObjects && state.isObjectSonificationEnabled) return false
-        val heading = latestHeadingDegrees ?: return false
-        val nowMs = SystemClock.elapsedRealtime()
-        if ((nowMs - lastLandmarkCueAtMs) < LANDMARK_CUE_COOLDOWN_MS) return false
-
-        val currentLocation = landmarkManager.currentLocation() ?: return false
-        val target =
-            selectNearestLandmarkTarget(
-                latitude = currentLocation.latitude,
-                longitude = currentLocation.longitude,
-                headingDegrees = heading,
-            ) ?: return false
-
-        return emitLandmarkCue(landmark = target.landmark, trigger = "context")
+        return false
     }
 
     private fun selectNearestLandmarkTarget(
@@ -920,22 +1034,7 @@ class StreamViewModel(
         val sceneWindowMs = sceneCueScheduler.sceneWindowMs(state.sceneRefreshRateHz)
         val interCueGapMs = sceneCueScheduler.buildScenePlan(emptyList(), state.sceneRefreshRateHz).interCueGapMs
         val sceneStartMs = SystemClock.elapsedRealtime()
-        val objectCandidates =
-            state.onlySonificationLabel?.let { onlyLabel ->
-                state.trackedObjects.filter { tracked ->
-                    ObjectCueSoundMap.normalizeLabel(tracked.label) == onlyLabel
-                }
-            } ?: state.trackedObjects
-        val rankedObjects =
-            if (state.isObjectSonificationEnabled) {
-                rankingPolicy.rankTrackedObjects(
-                    trackedObjects = objectCandidates,
-                    frameWidth = state.previewFrameWidth,
-                    frameHeight = state.previewFrameHeight,
-                )
-            } else {
-                emptyList()
-            }
+        val rankedObjects = emptyList<RankedObjectCandidate>()
         val rankedSegments =
             if (state.isSceneSegmentationSonificationEnabled) {
                 buildSceneSegmentationCandidates(state)
@@ -1075,65 +1174,114 @@ class StreamViewModel(
         }
     }
 
+    private suspend fun emitPeopleDetectionCue() {
+        val state = _uiState.value
+        if (!state.isObjectSonificationEnabled || state.onlySonificationLabel != PEOPLE_DETECTION_LABEL) {
+            return
+        }
+        if (state.previewFrameWidth <= 0 || state.previewFrameHeight <= 0) {
+            return
+        }
+
+        val people =
+            state.trackedObjects.filter { tracked ->
+                ObjectCueSoundMap.normalizeLabel(tracked.label) == PEOPLE_DETECTION_LABEL
+            }
+        val target =
+            rankingPolicy.selectTopRanked(
+                trackedObjects = people,
+                frameWidth = state.previewFrameWidth,
+                frameHeight = state.previewFrameHeight,
+            ) ?: return
+        playObjectCueCandidate(
+            candidate = target,
+            fallbackDurationMs = PEOPLE_DETECTION_INTERVAL_MS,
+            eventMessage = "People cue",
+        )
+    }
+
+    private fun buildObjectCueSpatialState(
+        relativeAzimuth: Float,
+    ): Triple<Float, Float, Float> {
+        val heading = latestHeadingDegrees ?: 0f
+        val worldBearing = normalize360(heading + relativeAzimuth)
+        val spatialAzimuth = normalizeSigned180(worldBearing - heading)
+        return Triple(heading, worldBearing, spatialAzimuth)
+    }
+
+    private suspend fun playObjectCueCandidate(
+        candidate: RankedObjectCandidate,
+        fallbackDurationMs: Long,
+        eventMessage: String,
+    ) {
+        val relativeAzimuth = trackAzimuthById[candidate.trackId] ?: 0f
+        val relativeElevation =
+            computeRelativeElevationDegrees(
+                boxTopNorm = candidate.box.top,
+                boxBottomNorm = candidate.box.bottom,
+            )
+        val (heading, worldBearing, spatialAzimuth) =
+            buildObjectCueSpatialState(
+                relativeAzimuth = relativeAzimuth,
+            )
+        activeCueWorldBearingDeg = worldBearing
+        cueScheduler.requestObjectCue(
+            trackId = candidate.trackId,
+            label = candidate.label,
+            soundAssetPath = candidate.soundAssetPath,
+            rank = candidate.rank,
+            elevationDeg = relativeElevation,
+        )
+        val playedDurationMs =
+            spatialAudioEngine.playSpatialCue(
+                soundAssetPath = candidate.soundAssetPath,
+                objectLabel = candidate.label,
+                azimuthDeg = spatialAzimuth,
+                elevationDeg = relativeElevation,
+            )
+        val indicatorDurationMs = if (playedDurationMs > 0L) playedDurationMs else fallbackDurationMs
+        audioPlaybackToken += 1L
+        val token = audioPlaybackToken
+        _uiState.update {
+            it.copy(
+                isAudioPlayingNow = true,
+                audioPlayingNowLabel = candidate.label,
+                activeObjectCueTrackId = candidate.trackId,
+                activeObjectCueLabel = candidate.label,
+                activeObjectCueSoundAsset = candidate.soundAssetPath,
+                activeObjectRelativeAzimuthDeg = relativeAzimuth,
+                activeObjectRelativeElevationDeg = relativeElevation,
+                activeObjectWorldBearingDeg = worldBearing,
+                activeObjectSpatialAzimuthDeg = spatialAzimuth,
+                activeObjectSpatialElevationDeg = relativeElevation,
+                headingDegrees = heading,
+                lastCueEvent =
+                    "$eventMessage rank=${"%.3f".format(candidate.rank)} az=${"%.1f".format(spatialAzimuth)}",
+            )
+        }
+        viewModelScope.launch {
+            delay(indicatorDurationMs)
+            if (audioPlaybackToken == token) {
+                _uiState.update {
+                    it.copy(
+                        isAudioPlayingNow = false,
+                        audioPlayingNowLabel = null,
+                    )
+                }
+            }
+        }
+    }
+
     private fun buildSceneSegmentationCandidates(state: StreamUiState): List<SceneCueCandidate> {
         val onlyLabel = state.onlySceneSonificationLabel
         if (onlyLabel != null && SceneClass.fromLabel(onlyLabel) == null) {
             return emptyList()
         }
-        val output = latestSegmentationOutput ?: return emptyList()
-        if (output.width <= 0 || output.height <= 0) return emptyList()
-
-        return output.perClassMasks.values
-            .asSequence()
-            .filter { mask -> mask.areaPixels > 0 }
-            .filter { mask -> onlyLabel == null || mask.label == onlyLabel }
-            .filter { mask -> IndoorLabelMap.labels.contains(mask.label) }
-            .mapNotNull { mask ->
-                val areaRatio = mask.areaPixels.toFloat() / (mask.width * mask.height).toFloat()
-                if (areaRatio < 0.005f) {
-                    return@mapNotNull null
-                }
-                val centroid = maskCentroid(mask.data, mask.width, mask.height) ?: return@mapNotNull null
-                val relativeAzimuth = ((centroid.first / mask.width.toFloat()) - 0.5f) * CAMERA_HORIZONTAL_FOV_DEGREES
-                val relativeElevation = (0.5f - (centroid.second / mask.height.toFloat())) * CAMERA_VERTICAL_FOV_DEGREES
-                val classPriority =
-                    when (mask.label) {
-                        "door", "windowpane" -> 0.90f
-                        "table", "chair", "sofa" -> 0.80f
-                        "wall", "floor", "ceiling" -> 0.60f
-                        else -> 0.40f
-                    }
-                val rank = ((areaRatio.coerceIn(0f, 0.35f) / 0.35f) * 0.55f) + (classPriority * 0.45f)
-                SceneCueCandidate(
-                    segmentId = "${mask.label}:${centroid.first.toInt()}:${centroid.second.toInt()}",
-                    label = mask.label,
-                    soundAssetPath = ObjectCueSoundMap.soundForLabel(mask.label),
-                    rank = rank.coerceIn(0f, 1f),
-                    relativeAzimuthDeg = relativeAzimuth,
-                    relativeElevationDeg = relativeElevation.coerceIn(-45f, 45f),
-                )
-            }.sortedByDescending { it.rank }
-            .toList()
-    }
-
-    private fun maskCentroid(
-        mask: BooleanArray,
-        width: Int,
-        height: Int,
-    ): Pair<Float, Float>? {
-        var sumX = 0.0
-        var sumY = 0.0
-        var count = 0
-        for (y in 0 until height) {
-            for (x in 0 until width) {
-                if (!mask[y * width + x]) continue
-                sumX += x.toDouble()
-                sumY += y.toDouble()
-                count += 1
-            }
-        }
-        if (count <= 0) return null
-        return Pair((sumX / count).toFloat(), (sumY / count).toFloat())
+        val output = latestPlaneReconstruction ?: return emptyList()
+        return soloPlanesReconstructor
+            ?.buildSceneCueCandidates(output)
+            ?.filter { candidate -> onlyLabel == null || candidate.label == onlyLabel }
+            .orEmpty()
     }
 
     private fun buildUnifiedEntriesWithinWindow(
@@ -1257,10 +1405,12 @@ class StreamViewModel(
         stateJob = null
         objectCueJob?.cancel()
         objectCueJob = null
+        stopNorthHaptics()
         stopHeadingMonitoring()
         trackAzimuthById.clear()
         activeCueWorldBearingDeg = null
         latestHeadingDegrees = null
+        spatialAudioEngine.clearContinuousChannels()
         streamSession?.close()
         streamSession = null
         streamTimer.stopTimer()
@@ -1527,14 +1677,226 @@ class StreamViewModel(
     override fun onCleared() {
         super.onCleared()
         stopStream()
+        stopNorthHaptics()
         headingService.close()
         mobileNetDetector?.close()
         yoloDetector?.close()
-        semanticSegmentationEngine.close()
+        soloPlanesReconstructor?.close()
         spatialAudioEngine.close()
         stateJob?.cancel()
         timerJob?.cancel()
         streamTimer.cleanup()
+    }
+
+    private fun updateContinuousAudioState() {
+        val state = _uiState.value
+        val channels = mutableListOf<ContinuousAudioChannelState>()
+
+        buildTrackedObjectContinuousChannel(state)?.let { channels += it }
+        buildNorthContinuousChannel(state)?.let { channels += it }
+
+        spatialAudioEngine.updateContinuousChannels(channels)
+        val labels =
+            channels.joinToString(separator = ", ") { channel ->
+                channel.objectLabel ?: channel.channelId.name.lowercase()
+            }.ifBlank { null }
+        _uiState.update {
+            it.copy(
+                isAudioPlayingNow = channels.isNotEmpty(),
+                audioPlayingNowLabel = labels,
+            )
+        }
+    }
+
+    private fun updateNorthHapticLoop() {
+        if (!_uiState.value.isNorthHapticEnabled) {
+            stopNorthHaptics()
+            return
+        }
+        northHapticJob?.cancel()
+        northHapticJob = viewModelScope.launch {
+            while (isActive && _uiState.value.isNorthHapticEnabled) {
+                val hapticMode = _uiState.value.northHapticMode
+                val heading = latestHeadingDegrees
+                if (heading == null) {
+                    delay(300L)
+                    continue
+                }
+                val northAzimuth = normalizeSigned180(0f - heading)
+                val headingError = abs(northAzimuth).coerceIn(0f, 180f)
+                val northAlignment = (1f - (headingError / 180f)).coerceIn(0f, 1f)
+                if (headingError <= 25f) {
+                    val durationMs =
+                        if (hapticMode == NorthFeedbackMode.EMPHATIC) {
+                            (170L + (northAlignment * 80f).toLong()).coerceIn(170L, 250L)
+                        } else {
+                            (120L + (northAlignment * 45f).toLong()).coerceIn(120L, 165L)
+                        }
+                    val amplitude =
+                        if (hapticMode == NorthFeedbackMode.EMPHATIC) {
+                            (165 + (northAlignment * 90f).toInt()).coerceIn(165, 255)
+                        } else {
+                            (70 + (northAlignment * 65f).toInt()).coerceIn(70, 135)
+                        }
+                    vibratePulse(durationMs = durationMs, amplitude = amplitude)
+                    val gapMs =
+                        if (hapticMode == NorthFeedbackMode.EMPHATIC) {
+                            (760L - (northAlignment * 180f).toLong()).coerceIn(520L, 760L)
+                        } else {
+                            (1120L - (northAlignment * 220f).toLong()).coerceIn(820L, 1120L)
+                        }
+                    delay(gapMs)
+                } else if (headingError >= 150f) {
+                    val southSuppression = ((headingError - 150f) / 30f).coerceIn(0f, 1f)
+                    val durationMs =
+                        if (hapticMode == NorthFeedbackMode.EMPHATIC) {
+                            (65L - (southSuppression * 18f).toLong()).coerceIn(38L, 65L)
+                        } else {
+                            (45L - (southSuppression * 18f).toLong()).coerceIn(24L, 45L)
+                        }
+                    val amplitude =
+                        if (hapticMode == NorthFeedbackMode.EMPHATIC) {
+                            (70 - (southSuppression * 28f).toInt()).coerceIn(34, 70)
+                        } else {
+                            (30 - (southSuppression * 14f).toInt()).coerceIn(16, 30)
+                        }
+                    vibratePulse(durationMs = durationMs, amplitude = amplitude)
+                    val gapMs = (1300L + Random.nextLong(220L)).coerceIn(1300L, 1520L)
+                    delay(gapMs)
+                } else {
+                    val offNorth = ((headingError - 25f) / 125f).coerceIn(0f, 1f)
+                    val burstCount = if (offNorth > 0.55f) 3 else 2
+                    repeat(burstCount) { burstIndex ->
+                        val durationMs =
+                            if (hapticMode == NorthFeedbackMode.EMPHATIC) {
+                                (70L + Random.nextLong(45L) + (offNorth * 22f).toLong())
+                                    .coerceIn(70L, 140L)
+                            } else {
+                                (48L + Random.nextLong(38L) + (offNorth * 14f).toLong())
+                                    .coerceIn(48L, 100L)
+                            }
+                        val amplitude =
+                            if (hapticMode == NorthFeedbackMode.EMPHATIC) {
+                                (110 + (offNorth * 85f).toInt() + Random.nextInt(0, 25))
+                                    .coerceIn(110, 210)
+                            } else {
+                                (70 + (offNorth * 45f).toInt() + Random.nextInt(0, 15))
+                                    .coerceIn(70, 130)
+                            }
+                        vibratePulse(durationMs = durationMs, amplitude = amplitude)
+                        if (burstIndex < burstCount - 1) {
+                            val gapMs =
+                                if (hapticMode == NorthFeedbackMode.EMPHATIC) {
+                                    (78L + Random.nextLong(90L) - (offNorth * 18f).toLong())
+                                        .coerceIn(55L, 150L)
+                                } else {
+                                    (95L + Random.nextLong(105L) - (offNorth * 16f).toLong())
+                                        .coerceIn(70L, 180L)
+                                }
+                            delay(gapMs)
+                        }
+                    }
+                    val settleMs =
+                        if (hapticMode == NorthFeedbackMode.EMPHATIC) {
+                            (460L - (offNorth * 150f).toLong() + Random.nextLong(120L))
+                                .coerceIn(200L, 500L)
+                        } else {
+                            (560L - (offNorth * 140f).toLong() + Random.nextLong(150L))
+                                .coerceIn(260L, 620L)
+                        }
+                    delay(settleMs)
+                }
+            }
+        }
+    }
+
+    private fun stopNorthHaptics() {
+        northHapticJob?.cancel()
+        northHapticJob = null
+        vibrator?.cancel()
+    }
+
+    private fun vibratePulse(durationMs: Long, amplitude: Int) {
+        val deviceVibrator = vibrator ?: return
+        deviceVibrator.vibrate(
+            VibrationEffect.createOneShot(
+                durationMs,
+                amplitude.coerceIn(1, 255),
+            ),
+        )
+    }
+
+    private fun buildTrackedObjectContinuousChannel(state: StreamUiState): ContinuousAudioChannelState? {
+        if (!isObjectTrackingChordPressed || !state.isObjectSonificationEnabled) {
+            return null
+        }
+        if (state.previewFrameWidth <= 0 || state.previewFrameHeight <= 0) {
+            return null
+        }
+
+        val filtered =
+            state.onlySonificationLabel?.let { onlyLabel ->
+                state.trackedObjects.filter { tracked ->
+                    ObjectCueSoundMap.normalizeLabel(tracked.label) == onlyLabel
+                }
+            } ?: state.trackedObjects
+        val ranked =
+            rankingPolicy.rankTrackedObjects(
+                trackedObjects = filtered,
+                frameWidth = state.previewFrameWidth,
+                frameHeight = state.previewFrameHeight,
+            )
+        val target = ranked.firstOrNull() ?: return null
+        val profile = ObjectSonificationProfiles.forLabel(target.label)
+        val widthNorm = (target.box.right - target.box.left).coerceIn(0f, 1f)
+        val heightNorm = (target.box.bottom - target.box.top).coerceIn(0f, 1f)
+        val areaNorm = (widthNorm * heightNorm).coerceIn(0f, 1f)
+        val proximityGain = (0.08f + (areaNorm * 0.60f)).coerceIn(0.05f, 0.28f)
+        val confidenceBrightness = ((target.score - 0.5f) * 0.7f).coerceIn(0f, 0.35f)
+        val relativeAzimuth = trackAzimuthById[target.trackId] ?: 0f
+        return ContinuousAudioChannelState(
+            channelId = ContinuousChannelId.OBJECT,
+            enabled = true,
+            soundAssetPath = ObjectCueSoundMap.soundForLabel(target.label),
+            objectLabel = target.label,
+            azimuthDeg = relativeAzimuth,
+            elevationDeg =
+                computeRelativeElevationDegrees(
+                    boxTopNorm = target.box.top,
+                    boxBottomNorm = target.box.bottom,
+                ),
+            gain = (proximityGain * profile.gain).coerceIn(0.05f, 0.30f),
+            tiltEq = (profile.tiltEq + confidenceBrightness).coerceIn(-0.2f, 0.45f),
+            beatRateHz = 0f,
+        )
+    }
+
+    private fun buildNorthContinuousChannel(state: StreamUiState): ContinuousAudioChannelState? {
+        if (!state.isNorthCueEnabled) {
+            return null
+        }
+        val heading = latestHeadingDegrees ?: return null
+        val northAzimuth = normalizeSigned180(0f - heading)
+        val headingError = abs(northAzimuth).coerceIn(0f, 180f)
+        val mappedHeadingError =
+            if (state.northAudioMode == NorthFeedbackMode.EMPHATIC) {
+                180f - headingError
+            } else {
+                headingError
+            }.coerceIn(0f, 180f)
+        val gain = (0.03f + ((mappedHeadingError / 180f) * 0.22f)).coerceIn(0.03f, 0.25f)
+        val beatRateHz = (0.5f + ((mappedHeadingError / 180f) * 2.5f)).coerceIn(0.5f, 3.0f)
+        return ContinuousAudioChannelState(
+            channelId = ContinuousChannelId.NORTH,
+            enabled = true,
+            soundAssetPath = NORTH_CUE_SOUND_ASSET_PATH,
+            objectLabel = "north",
+            azimuthDeg = northAzimuth,
+            elevationDeg = 0f,
+            gain = gain,
+            tiltEq = 0.12f,
+            beatRateHz = beatRateHz,
+        )
     }
 
     class Factory(
