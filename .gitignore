@@ -4,7 +4,7 @@ __pycache__/
 *.pkl
 
 # SOFA files
-samples/MetaGlassesSensoryAugmentation/app/src/main/assets/sofa/BRIR_HATS_3degree_for_glasses.sofa
+samples/MetaGlassesSensoryAugmentation/app/src/main/assets/sofa/*
 
 # Models
 samples/MetaGlassesSensoryAugmentation/app/src/main/assets/models/**
