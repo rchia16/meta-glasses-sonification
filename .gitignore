@@ -1,38 +1,42 @@
 # SOFA files
-samples\CameraAccess\app\src\main\assets\sofa\*.sofa
+samples/MetaGlassesSensoryAugmentation/app/src/main/assets/sofa/BRIR_HATS_3degree_for_glasses.sof
+
+# Models
+samples\MetaGlassesSensoryAugmentation\app\src\main\assets\models\*\*
+samples\MetaGlassesSensoryAugmentation\app\src\main\assets\models\*
 
 # Gradle files
-samples/CameraAccess/.gradle/
-samples/CameraAccess/build/
+samples/MetaGlassesSensoryAugmentation/.gradle/
+samples/MetaGlassesSensoryAugmentation/build/
 
 # Local configuration file (sdk path, etc)
-samples/CameraAccess/local.properties
+samples/MetaGlassesSensoryAugmentation/local.properties
 
 # Log/OS Files
-samples/CameraAccess/*.log
+samples/MetaGlassesSensoryAugmentation/*.log
 
 # Android Studio generated files and folders
-samples/CameraAccess/captures/
-samples/CameraAccess/.externalNativeBuild/
-samples/CameraAccess/.cxx/
-samples/CameraAccess/*.aab
-samples/CameraAccess/*.apk
-samples/CameraAccess/output-metadata.json
+samples/MetaGlassesSensoryAugmentation/captures/
+samples/MetaGlassesSensoryAugmentation/.externalNativeBuild/
+samples/MetaGlassesSensoryAugmentation/.cxx/
+samples/MetaGlassesSensoryAugmentation/*.aab
+samples/MetaGlassesSensoryAugmentation/*.apk
+samples/MetaGlassesSensoryAugmentation/output-metadata.json
 
 # IntelliJ
-samples/CameraAccess/*.iml
-samples/CameraAccess/.idea/
-samples/CameraAccess/misc.xml
-samples/CameraAccess/deploymentTargetDropDown.xml
-samples/CameraAccess/render.experimental.xml
+samples/MetaGlassesSensoryAugmentation/*.iml
+samples/MetaGlassesSensoryAugmentation/.idea/
+samples/MetaGlassesSensoryAugmentation/misc.xml
+samples/MetaGlassesSensoryAugmentation/deploymentTargetDropDown.xml
+samples/MetaGlassesSensoryAugmentation/render.experimental.xml
 
 # Keystore files
-samples/CameraAccess/*.jks
-samples/CameraAccess/*.keystore
+samples/MetaGlassesSensoryAugmentation/*.jks
+samples/MetaGlassesSensoryAugmentation/*.keystore
 
 # Google Services (e.g. APIs or Firebase)
-samples/CameraAccess/google-services.json
+samples/MetaGlassesSensoryAugmentation/google-services.json
 
 # Android Profiling
-samples/CameraAccess/*.hprof
+samples/MetaGlassesSensoryAugmentation/*.hprof
 
